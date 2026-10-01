@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -55,12 +56,12 @@ func runAdvert(ctx *cli.Context) error {
 			return fmt.Errorf("reading ssh host key file: %w", err)
 		}
 
-		fields := strings.Fields(string(data))
-		if len(fields) < 2 {
-			return fmt.Errorf("ssh host key file %q doesn't look like a public key", hostKeyFile)
+		hostKey, err := encodeHostKeyTxt(data)
+		if err != nil {
+			return fmt.Errorf("ssh host key file %q: %w", hostKeyFile, err)
 		}
 
-		text = append(text, "hostKey="+fields[1])
+		text = append(text, "hostKey="+hostKey)
 	}
 
 	id, err := uuid.NewV4()
@@ -90,4 +91,19 @@ func runAdvert(ctx *cli.Context) error {
 	<-sig
 
 	return nil
+}
+
+// encodeHostKeyTxt builds the mDNS TXT "hostKey" value from the contents of
+// an SSH public key file (e.g. ssh_host_ed25519_key.pub). Nix's machines-file
+// / ssh-ng "base64-ssh-public-host-key" field is base64-decoded and written
+// verbatim as a known_hosts line ("host <decoded>"), so the encoded value
+// must be the whole "algorithm base64key" pair, not just the bare key blob.
+func encodeHostKeyTxt(pubKeyFile []byte) (string, error) {
+	fields := strings.Fields(string(pubKeyFile))
+	if len(fields) < 2 {
+		return "", fmt.Errorf("doesn't look like a public key")
+	}
+
+	knownHostsKey := fields[0] + " " + fields[1]
+	return base64.StdEncoding.EncodeToString([]byte(knownHostsKey)), nil
 }
